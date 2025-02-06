@@ -1,0 +1,66 @@
+import express from 'express';
+import multer from 'multer';
+import { BusinessEntityController } from '../controllers/businessEntityController.js';
+
+
+const router = express.Router();
+const upload = multer({ dest: 'uploads/' });
+
+router.get('/getAllBusinessEntities/:groupId', BusinessEntityController.getAllBusinessEntities);
+router.post('/addBusinessEntity', BusinessEntityController.addBusinessEntity);
+router.post('/getBusinessEntitybyEmail', BusinessEntityController.getBusinessEntitybyEmail);
+router.get('/getAllRestaurantsProductsByGroupId/:groupId', BusinessEntityController.getAllRestaurantsAndProducts);
+router.get('/getBusinessEntitiesforpasswordreset', BusinessEntityController.getBusinessEntitiesforpasswordreset);
+router.post('/addProductForBusiness', BusinessEntityController.addProductForBusinessEntity);
+router.get('/getAllSubscribedRestoNProdsViaGroupId/:groupId', BusinessEntityController.getAllRestoNProdsViaGroupId);
+router.get('/updateRestoProductStat/:flag/:bepmId', BusinessEntityController.changeRestoProductStat);
+router.get('/unlinkRestoAndProduct/:bepmId', BusinessEntityController.unlinkRestoAndProduct);
+router.get('/getAllRegisteredBusinessEntities', BusinessEntityController.getAllRegisteredBusinessEntities);
+router.get('/getAllBusinessEntityUsers/:bEId', BusinessEntityController.getAllUsersByBusinessEntity);
+router.put('/passwordreset/:id', BusinessEntityController.passwordreset);
+router.get('/updateUserActiveStat/:flag/:userId', BusinessEntityController.changeUserActiveStat);
+router.post('/addNewBusinessUser', BusinessEntityController.addNewBusinessUser);
+router.post('/deleteBusinessUser', BusinessEntityController.deleteUserForBusiness);
+router.post('/updateMenuCategory', BusinessEntityController.addUpdateMenuCategory);
+router.get('/withoutRestaurants', BusinessEntityController.getBusinessesWithoutRestaurants);
+router.get('/getAllMenuCategories/:bEId', BusinessEntityController.getAllMenuCategoryByBusinessEntity);
+router.post('/addMenuItem', BusinessEntityController.addMenuItem);
+router.get('/getAllMenuItems/:bEId', BusinessEntityController.getAllMenuByBusinessEntity);
+router.post('/updateSection', BusinessEntityController.addOrUpdateSection);
+router.get('/getAllSections/:bEId', BusinessEntityController.getAllSectionsByBusinessEntity);
+router.post('/updateTable', BusinessEntityController.addOrUpdateTable);
+router.get('/getAllTables/:bEId', BusinessEntityController.getAllTablesByBusinessEntity);
+router.post('/getAllProductsAndPlans', BusinessEntityController.getAllProductsAndPlans);
+router.post('/subscribeProduct', BusinessEntityController.subscribeToProduct);
+router.post('/totalcashcollected', BusinessEntityController.getTotalAmountByCash);
+router.get('/getAllUnitsViaRestoId/:restaurantId', BusinessEntityController.getAllUnitsForRestaurant);
+router.get('/getAllUnitsConversionsViaRestoId/:restaurantId', BusinessEntityController.getAllUnitsConversionsForRestaurant);
+router.get('/getAllIngredientsViaRestoId/:restaurantId', BusinessEntityController.getAllIngredientsForRestaurant);
+router.post('/upload-menu-csv', upload.single('file'), BusinessEntityController.uploadMenuCSV);
+router.post('/upload-category-csv', upload.single('file'), BusinessEntityController.uploadCategoryCSV);
+router.post('/upload-section-csv', upload.single('file'), BusinessEntityController.uploadSectionCSV);
+router.post('/upload-table-csv', upload.single('file'), BusinessEntityController.uploadTableCSV);
+router.get('/getAllRecipesViaRestoId/:restaurantId', BusinessEntityController.getAllRecipesForRestaurant);
+router.get('/getAllRecipesAndMenuItemsViaRestoId/:restaurantId', BusinessEntityController.getRecipesAndItemsForRestaurant);
+router.post('/addUnit', BusinessEntityController.addUnit);
+router.patch('/updateUnit/:unitId', BusinessEntityController.updateUnit);
+router.post('/updateMenuItems', BusinessEntityController.updateMenuItem);
+router.delete('/deleteMenuItem/:menu_id', BusinessEntityController.deleteMenuItem);
+router.delete('/deleteSection/:section_id', BusinessEntityController.deleteSection);
+router.delete('/deleteCategory/:category_id', BusinessEntityController.deleteCategory);
+router.delete('/deleteTable/:table_id', BusinessEntityController.deleteTable);
+router.post('/addUnitConversion', BusinessEntityController.addUnitConversion);
+router.post('/addIngredient', BusinessEntityController.addIngredient);
+router.post('/addRecipe', BusinessEntityController.addRecipe);
+router.post('/updateRecipeMenuLinks', BusinessEntityController.updateRecipeMenuLinks);
+router.put('/updateUnitConversion', BusinessEntityController.updateUnitConversion);
+router.put('/updateRecipe/:recipeId', BusinessEntityController.updateRecipe);
+router.put('/updateIngredient/:ingredientId', BusinessEntityController.updateIngredient);
+router.delete('/deleteUnit/:unitId', BusinessEntityController.deleteUnit);
+router.delete('/deleteUnitConversion/:conversionId', BusinessEntityController.deleteUnitConversion);
+router.delete('/deleteIngredient/:ingredientId', BusinessEntityController.deleteIngredient);
+router.delete('/deleteRecipe/:recipeId', BusinessEntityController.deleteRecipe);
+router.post('/updatePosition', BusinessEntityController.updatePosition)
+router.post('/logs', BusinessEntityController.getInventoryLogs);;
+
+export default router;
