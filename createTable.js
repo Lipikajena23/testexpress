@@ -4,11 +4,18 @@ const app = express();
 
 // MySQL connection setup
 const db = mysql.createConnection({
-  host: '127.0.0.1',
-  user: 'root', // Replace with your MySQL username
-  password: 'Lipika123@', // Replace with your MySQL password
-  database: 'buybyeqretail', // Replace with your database name
+  host: '166.1.227.11',
+  user: 'gen_user', // Replace with your MySQL username
+  password: '@Om1FCuua8AR=A', // Replace with your MySQL password
+  database: 'buybyeqtestdb', // Replace with your database name
 });
+
+// const db = mysql.createConnection({
+//   host: '127.0.0.1',
+//   user: 'root', // Replace with your MySQL username
+//   password: 'Lipika123@', // Replace with your MySQL password
+//   database: 'testdb', // Replace with your database name
+// });
 
 db.connect((err) => {
   if (err) throw err;
@@ -412,18 +419,18 @@ const tableQueries = [
   sgst decimal(5,2) DEFAULT '0.00',
   hsn_code varchar(50) DEFAULT NULL,
   is_active tinyint(1) DEFAULT '1',
-  category_id int NOT NULL,
+  category_id int DEFAULT NULL,
   retail_shop_id int NOT NULL,
   updated_on datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  category_sku_id int DEFAULT NULL,
+  category_sku_id int NOT NULL,
   PRIMARY KEY (id),
-  UNIQUE KEY barcode (barcode),
   KEY category_id (category_id),
   KEY retail_shop_id (retail_shop_id),
   KEY fk_items_category_sku (category_sku_id),
   CONSTRAINT fk_items_category_sku FOREIGN KEY (category_sku_id) REFERENCES category_sku (id) ON DELETE CASCADE,
   CONSTRAINT retail_items_ibfk_1 FOREIGN KEY (category_id) REFERENCES retail_category (id) ON DELETE CASCADE,
   CONSTRAINT retail_items_ibfk_2 FOREIGN KEY (retail_shop_id) REFERENCES retail_shops (id) ON DELETE CASCADE
+
 )`, 
  
   
@@ -590,7 +597,83 @@ const tableQueries = [
     CONSTRAINT wastage_ibfk_1 FOREIGN KEY (menu_ingredient_id) REFERENCES menu_ingredients (id),
     CONSTRAINT wastage_ibfk_2 FOREIGN KEY (restaurant_id) REFERENCES restaurants (id)
   )`,
+
+  `CREATE TABLE retail_customers (
+  id int NOT NULL AUTO_INCREMENT,
+  retail_shop_id int NOT NULL,
+  name varchar(255) DEFAULT NULL,
+  phone varchar(20) DEFAULT NULL,
+  gst_number varchar(50) DEFAULT NULL,
+  customer_type enum('New','Repeat') DEFAULT 'New',
+  created_at datetime DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (id)
+) `,
+ `CREATE TABLE retail_orders (
+  id int NOT NULL AUTO_INCREMENT,
+  date date DEFAULT NULL,
+  time time DEFAULT NULL,
+  retail_shop_id int NOT NULL,
+  order_no varchar(50) NOT NULL,
+  customer_id int DEFAULT NULL,
+  user_id int DEFAULT NULL,
+  total_amount decimal(10,2) NOT NULL DEFAULT '0.00',
+  total_discount decimal(10,2) NOT NULL DEFAULT '0.00',
+  taxable_amount decimal(10,2) NOT NULL DEFAULT '0.00',
+  total_cgst decimal(10,2) NOT NULL DEFAULT '0.00',
+  total_sgst decimal(10,2) NOT NULL DEFAULT '0.00',
+  grand_total decimal(10,2) NOT NULL DEFAULT '0.00',
+  payment_status enum('Pending','Paid','Cancelled') DEFAULT 'Pending',
+  payment_mode varchar(50) DEFAULT NULL,
+  via_cash double DEFAULT '0',
+  via_card double DEFAULT '0',
+  via_upi double DEFAULT '0',
+  order_status enum('Ongoing','Completed','Cancelled','Hold') DEFAULT 'Ongoing',
+  created_at datetime DEFAULT CURRENT_TIMESTAMP,
+  updated_at datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  discount_type enum('Percentage','Fixed') DEFAULT NULL,
+  PRIMARY KEY (id),
+  UNIQUE KEY order_no (order_no),
+  KEY customer_id (customer_id),
+  KEY user_id (user_id),
+  CONSTRAINT retail_orders_ibfk_1 FOREIGN KEY (customer_id) REFERENCES retail_customers (id) ON DELETE SET NULL,
+  CONSTRAINT retail_orders_ibfk_2 FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE SET NULL
+) `,
+
+`CREATE TABLE retail_order_items (
+  id int NOT NULL AUTO_INCREMENT,
+  retail_shop_id int NOT NULL,
+  order_id int NOT NULL,
+  item_id int NOT NULL,
+  quantity int NOT NULL DEFAULT '1',
+  unit_price decimal(10,2) NOT NULL,
+  discount_type enum('Percentage','Fixed') DEFAULT NULL,
+  discount decimal(10,2) DEFAULT '0.00',
+  discounted_price decimal(10,2) NOT NULL DEFAULT '0.00',
+  taxable_amount decimal(10,2) NOT NULL DEFAULT '0.00',
+  cgst decimal(10,2) NOT NULL DEFAULT '0.00',
+  sgst decimal(10,2) NOT NULL DEFAULT '0.00',
+  total_price decimal(10,2) NOT NULL DEFAULT '0.00',
+  created_at datetime DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  KEY order_id (order_id),
+  KEY item_id (item_id),
+  CONSTRAINT retail_order_items_ibfk_1 FOREIGN KEY (order_id) REFERENCES retail_orders (id) ON DELETE CASCADE,
+  CONSTRAINT retail_order_items_ibfk_2 FOREIGN KEY (item_id) REFERENCES retail_items (id) ON DELETE CASCADE
+) `,
+
+`CREATE TABLE retail_orders_hold (
+  id int NOT NULL AUTO_INCREMENT,
+  retail_shop_id int NOT NULL,
+  order_id int NOT NULL,
+  hold_reason varchar(255) DEFAULT NULL,
+  is_active tinyint(1) NOT NULL DEFAULT '1',
+  created_at datetime DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  KEY order_id (order_id),
+  CONSTRAINT retail_orders_hold_ibfk_1 FOREIGN KEY (order_id) REFERENCES retail_orders (id) ON DELETE CASCADE
+)`,
   
+
   
 ];
 
