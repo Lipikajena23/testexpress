@@ -330,15 +330,15 @@ class retailController{
           const { skuCode, description, categoryId } = req.body; // SKU code, description, and category ID from the request body
 
 
-          // Check if the SKU code already exists
-          const skuExists = await query(`
-            SELECT COUNT(*) AS count
-            FROM category_sku
-            WHERE sku_code = ?`, [skuCode]);
+          // // Check if the SKU code already exists
+          // const skuExists = await query(`
+          //   SELECT COUNT(*) AS count
+          //   FROM category_sku
+          //   WHERE sku_code = ?`, [skuCode]);
       
-          if (skuExists[0].count > 0) {
-            return res.status(400).json({ error: 'SKU code already exists' });
-          }
+          // if (skuExists[0].count > 0) {
+          //   return res.status(400).json({ error: 'SKU code already exists' });
+          // }
       
           // Update the SKU code, description, and category ID
           const updateResult = await query(`

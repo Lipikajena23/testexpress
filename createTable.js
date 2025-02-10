@@ -4,9 +4,9 @@ const app = express();
 
 // MySQL connection setup
 const db = mysql.createConnection({
-  host: '166.1.227.11',
+  host: '195.133.93.66',
   user: 'gen_user', // Replace with your MySQL username
-  password: '@Om1FCuua8AR=A', // Replace with your MySQL password
+  password: 'IQ\hXxllgV0}gd', // Replace with your MySQL password
   database: 'buybyeqtestdb', // Replace with your database name
 });
 
