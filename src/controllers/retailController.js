@@ -59,20 +59,57 @@ class retailController{
 
 
       // Add a Category
+    // static async addCategory(req, res) {
+    //     const query = util.promisify(db.query).bind(db);
+    //     try {
+    //         const { name, description, isActive, retailShopId } = req.body;
+    //         await query(
+    //             'INSERT INTO retail_category (name, description, is_active, retail_shop_id) VALUES (?, ?, ?, ?)',
+    //             [name, description, isActive, retailShopId]
+    //         );
+    //         res.status(200).json({ message: 'Category added successfully' });
+    //     } catch (error) {
+    //         console.error('Error adding category:', error);
+    //         res.status(500).json({ error: 'Internal Server Error' });
+    //     }
+    // }
+
     static async addCategory(req, res) {
-        const query = util.promisify(db.query).bind(db);
-        try {
-            const { name, description, isActive, retailShopId } = req.body;
-            await query(
-                'INSERT INTO retail_category (name, description, is_active, retail_shop_id) VALUES (?, ?, ?, ?)',
-                [name, description, isActive, retailShopId]
-            );
-            res.status(200).json({ message: 'Category added successfully' });
-        } catch (error) {
-            console.error('Error adding category:', error);
-            res.status(500).json({ error: 'Internal Server Error' });
-        }
-    }
+      const query = util.promisify(db.query).bind(db); // Use promisified query directly
+  
+      try {
+          const { name, description, isActive, retailShopId } = req.body;
+  
+          // Insert new category
+          const result = await query(
+              'INSERT INTO retail_category (name, description, is_active, retail_shop_id) VALUES (?, ?, ?, ?)',
+              [name, description, isActive, retailShopId]
+          );
+          const categoryId = result.insertId; // Get the inserted category ID
+  
+          // Fetch all sections belonging to the same retail shop
+          const sections = await query(
+              'SELECT id FROM retail_sections WHERE retail_shop_id = ?',
+              [retailShopId]
+          );
+  
+          // Map the new category to all sections of the retail shop
+          const mappingPromises = sections.map(section => {
+              return query(
+                  'INSERT INTO retail_section_category_mapping (section_id, category_id, is_active) VALUES (?, ?, ?)',
+                  [section.id, categoryId, 1]
+              );
+          });
+          await Promise.all(mappingPromises);
+  
+          res.status(200).json({ message: 'Category added and mapped successfully' });
+  
+      } catch (error) {
+          console.error('Error adding category:', error);
+          res.status(500).json({ error: 'Internal Server Error' });
+      }
+  }
+  
 
     static async getAllCategories(req, res) {
         const query = util.promisify(db.query).bind(db);
@@ -292,6 +329,34 @@ class retailController{
         }
     }
 
+    static async updateCategoryMapping(req, res) {
+      const query = util.promisify(db.query).bind(db);
+  
+      try {
+          const { categoryId, sectionMappings } = req.body; // sectionMappings = [{ sectionId: 1, isActive: 0 }, { sectionId: 2, isActive: 1 }]
+  
+          if (!categoryId || !Array.isArray(sectionMappings)) {
+              return res.status(400).json({ error: "Invalid input. categoryId and sectionMappings are required." });
+          }
+  
+          // Update mappings based on user selection
+          const updatePromises = sectionMappings.map(({ sectionId, isActive }) => {
+              return query(
+                  'UPDATE retail_section_category_mapping SET is_active = ? WHERE category_id = ? AND section_id = ?',
+                  [isActive, categoryId, sectionId]
+              );
+          });
+          await Promise.all(updatePromises);
+  
+          res.status(200).json({ message: "Category mapping updated successfully." });
+  
+      } catch (error) {
+          console.error("Error updating category mapping:", error);
+          res.status(500).json({ error: "Internal Server Error" });
+      }
+  }
+  
+
     //retail sku
     static async addSkuCode(req, res) {
         const query = util.promisify(db.query).bind(db);
@@ -508,7 +573,7 @@ class retailController{
                 JOIN 
                     retail_section_category_mapping rscm ON rc.id = rscm.category_id
                 WHERE 
-                    rscm.section_id = ?;
+                    rscm.section_id = ? AND rscm.is_active = 1;
             `, [sectionId]);
     
             return res.status(200).json({ categories });
@@ -895,7 +960,14 @@ class retailController{
             order_id
           ]
         );
-  
+         
+        // Check if order exists in retail_hold table
+    const holdResult = await query('SELECT id FROM retail_orders_hold WHERE order_id = ?', [order_id]);
+    if (holdResult.length > 0) {
+      // Update is_active to 0 in retail_hold
+      await query('UPDATE retail_orders_hold SET is_active = 0 WHERE order_id = ?', [order_id]);
+    }
+
         return res.status(200).json({
           message: 'Order and customer details updated successfully',
           order_id,
@@ -1150,6 +1222,24 @@ static async addOrderItem(req, res) {
     console.error('Error:', error);
     res.status(500).json({ error: 'Internal Server Error' });
 }
+}
+
+static async getCategorySections(req, res) {
+  const query = util.promisify(db.query).bind(db);
+  try {
+      const { categoryId } = req.params;
+      if (!categoryId) return res.status(400).json({ error: "Category ID is required" });
+
+      const sections = await query(
+          "SELECT rsc.section_id, rs.name AS section_name, rsc.is_active FROM retail_section_category_mapping rsc JOIN retail_sections rs ON rsc.section_id = rs.id WHERE rsc.category_id = ?",
+          [categoryId]
+      );
+
+      res.status(200).json(sections);
+  } catch (error) {
+      console.error("Error fetching category sections:", error);
+      res.status(500).json({ error: "Internal Server Error" });
+  }
 }
 
 

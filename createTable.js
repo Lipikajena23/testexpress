@@ -3,11 +3,14 @@ import express from 'express';
 const app = express();
 
 // MySQL connection setup
+
+
 const db = mysql.createConnection({
-  host: '195.133.93.66',
-  user: 'gen_user', // Replace with your MySQL username
-  password: 'IQ\hXxllgV0}gd', // Replace with your MySQL password
-  database: 'buybyeqtestdb', // Replace with your database name
+    port: "3306",
+    user: "gen_user",
+    host: "195.133.93.66",
+    database: "buybyeqtestdb",
+    password: "IQ\\hXxllgV0\}gd"
 });
 
 // const db = mysql.createConnection({
@@ -560,16 +563,17 @@ const tableQueries = [
   )`,
   
   
-  `CREATE TABLE IF NOT EXISTS retail_section_category_mapping (
-    id int NOT NULL AUTO_INCREMENT,
-    section_id int NOT NULL,
-    category_id int NOT NULL,
-    PRIMARY KEY (id),
-    UNIQUE KEY unique_retail_section_category (section_id,category_id),
-    KEY category_id (category_id),
-    CONSTRAINT retail_section_category_mapping_ibfk_1 FOREIGN KEY (section_id) REFERENCES retail_sections (id) ON DELETE CASCADE,
-    CONSTRAINT retail_section_category_mapping_ibfk_2 FOREIGN KEY (category_id) REFERENCES retail_category (id) ON DELETE CASCADE
-  )`,
+  `CREATE TABLE retail_section_category_mapping (
+  id int NOT NULL AUTO_INCREMENT,
+  section_id int NOT NULL,
+  category_id int NOT NULL,
+  is_active tinyint(1) DEFAULT '1',
+  PRIMARY KEY (id),
+  UNIQUE KEY unique_retail_section_category (section_id,category_id),
+  KEY category_id (category_id),
+  CONSTRAINT retail_section_category_mapping_ibfk_1 FOREIGN KEY (section_id) REFERENCES retail_sections (id) ON DELETE CASCADE,
+  CONSTRAINT retail_section_category_mapping_ibfk_2 FOREIGN KEY (category_id) REFERENCES retail_category (id) ON DELETE CASCADE,
+)`,
   
   `CREATE TABLE IF NOT EXISTS tables (
     id int NOT NULL AUTO_INCREMENT,

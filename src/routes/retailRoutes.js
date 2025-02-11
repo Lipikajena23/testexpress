@@ -56,4 +56,10 @@ router.delete('/delete-Order-Item', retailController.deleteOrderItem);
 router.post('/add-Order-item', retailController.addOrderItem);
 
 
+// Update category-section mapping (enable/disable mappings)
+router.put("/update-category-mapping", retailController.updateCategoryMapping);
+router.get("/get-category-sections/:categoryId", retailController.getCategorySections);
+
+
+
 export default router;
