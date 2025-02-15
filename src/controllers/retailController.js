@@ -1,5 +1,6 @@
 import db from '../config/db.js';
 import util from 'util';
+import xlsx from 'xlsx';
 
 
 class retailController{
@@ -424,18 +425,30 @@ class retailController{
       static async deleteSkuCode(req, res) {
         const query = util.promisify(db.query).bind(db);
         try {
-          const { skuId } = req.params;
-      
-          await query(`
-            DELETE FROM category_sku
-            WHERE id = ?`, [skuId]);
-      
-          return res.status(200).json({ message: 'SKU code deleted successfully' });
+            const { skuId } = req.params;
+            const { unlink } = req.query; // Read the "unlink" query parameter
+    
+            if (unlink === "true") {
+                // Step 1: Unlink items first by setting sku_id to NULL
+                await query(`
+                    UPDATE retail_items
+                    SET category_sku_id = NULL
+                    WHERE category_sku_id = ?`, [skuId]);
+            }
+    
+            // Step 2: Delete SKU from category_sku table
+            await query(`
+                DELETE FROM category_sku
+                WHERE id = ?`, [skuId]);
+    
+            return res.status(200).json({ message: 'SKU code deleted successfully' });
+    
         } catch (error) {
-          console.error('Error:', error);
-          return res.status(500).json({ error: 'Internal Server Error' });
+            console.error('Error:', error);
+            return res.status(500).json({ error: 'Internal Server Error' });
         }
-      }
+    }
+    
 
 
       static async getAllSku(req, res) {
@@ -587,18 +600,34 @@ class retailController{
     static async getitemsbybarcode(req, res) {
       const query = util.promisify(db.query).bind(db);
       try {
-        const barcode = req.params.barcode;
-        const retail_shop_id = req.params.retail_shop_id;
-        const items = await query(
-          'SELECT * FROM retail_items WHERE  barcode = ? AND retail_shop_id = ? ',
-          [barcode,retail_shop_id]
-        );
-        res.status(200).json(items);
+          const { barcode, retail_shop_id, section_id } = req.params;
+  
+          let sql = `
+              SELECT ri.*
+              FROM retail_items ri
+              WHERE ri.barcode = ? 
+                AND ri.retail_shop_id = ? `;
+  
+          const params = [barcode, retail_shop_id];
+  
+          // If section_id is provided, join with retail_section_category_mapping
+          if (section_id) {
+              sql += `
+                  AND ri.category_id IN (
+                      SELECT category_id FROM retail_section_category_mapping 
+                      WHERE section_id = ? AND is_active = 1 
+                  )`;
+              params.push(section_id);
+          }
+  
+          const items = await query(sql, params);
+          res.status(200).json(items);
       } catch (error) {
-        console.error('Error fetching data:', error);
-        res.status(500).json({ error: 'Internal Server Error' });
+          console.error('Error fetching data:', error);
+          res.status(500).json({ error: 'Internal Server Error' });
       }
-    }
+  }
+  
       
     
     // save items in cart
@@ -619,6 +648,7 @@ class retailController{
           total_cgst, 
           total_sgst, 
           grand_total, 
+          section_id,
           items 
         } = req.body; 
     
@@ -632,12 +662,12 @@ class retailController{
         const [orderInsert] = await connection.query(
           `INSERT INTO retail_orders 
           (retail_shop_id, order_no, customer_id, user_id, total_amount, total_discount, 
-           taxable_amount, total_cgst, total_sgst, grand_total, payment_mode, order_status) 
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           taxable_amount, total_cgst, total_sgst, grand_total, payment_mode,section_id, order_status) 
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,?, ?)`,
           [
             retail_shop_id, order_no, customer_id, user_id, 
             total_amount, total_discount, taxable_amount, total_cgst, 
-            total_sgst, grand_total, payment_mode, 'Ongoing'
+            total_sgst, grand_total, payment_mode,section_id, 'Ongoing'
           ]
         );
     
@@ -678,13 +708,16 @@ class retailController{
   
       try {
         const { order_id } = req.params; // Get order ID from URL params
-  
+        const { section_id } = req.query;
+
+        console.log("ggg",section_id)
+
         if (!order_id) {
           return res.status(400).json({ error: 'Order ID is required' });
         }
   
         // Fetch order details including customer_id
-        const orderDetails = await query(`
+        const orderDetailsQuery =`
           SELECT 
             ro.id AS order_id, 
             ro.customer_id, 
@@ -702,12 +735,18 @@ class retailController{
             ro.order_status,
             ro.order_no,
             c.name AS customer_name, 
-            c.phone AS customer_phone
+            c.phone AS customer_phone,
+            c.gst_number AS customer_GST
           FROM retail_orders ro
           LEFT JOIN retail_customers c ON ro.customer_id = c.id
           WHERE ro.id = ?
-        `, [order_id]);
+          ${section_id ? 'AND ro.section_id = ?' : ''}
+        `;
+
+        const queryParams = section_id ? [order_id, section_id] : [order_id];
   
+        const orderDetails = await query(orderDetailsQuery, queryParams);
+
         if (orderDetails.length === 0) {
           return res.status(404).json({ message: 'Order not found' });
         }
@@ -719,7 +758,8 @@ class retailController{
               id: orderInfo.customer_id,
               name: orderInfo.customer_name,
               email: orderInfo.customer_email,
-              phone: orderInfo.customer_phone
+              phone: orderInfo.customer_phone,
+              GST_No: orderInfo.customer_GST,
             }
           : null;
   
@@ -909,6 +949,7 @@ class retailController{
           via_cash,
           via_upi,
           via_card,
+          taxable_amount,
           retail_shop_id
         } = req.body;
   
@@ -948,15 +989,15 @@ class retailController{
         // Update order details
         await query(
           `UPDATE retail_orders 
-           SET discount_type = ?, total_discount = ?, total_amount = ?, 
+           SET discount_type = ?, total_discount = ?, grand_total = ?, 
                total_cgst = ?, total_sgst = ?, payment_mode = ?, 
-               via_cash = ?, via_upi = ?, via_card = ?, 
+               via_cash = ?, via_upi = ?, via_card = ?,taxable_amount =? , 
                payment_status = 'Paid', order_status = 'Completed'
            WHERE id = ?`,
           [
             discount_type, total_discount, total_amount,
             total_cgst, total_sgst, payment_mode,
-            via_cash, via_upi, via_card,
+            via_cash, via_upi, via_card,taxable_amount,
             order_id
           ]
         );
@@ -988,6 +1029,59 @@ class retailController{
     }
   
 
+    static async updateOrderItemQuantity(req, res) {
+      const query = util.promisify(db.query).bind(db);
+      try {
+          const { order_item_id, new_quantity, order_id } = req.body;
+
+          // Get current item details
+          const item = await query('SELECT * FROM retail_order_items WHERE id = ?', [order_item_id]);
+          if (item.length === 0) {
+              return res.status(404).json({ error: 'Order item not found' });
+          }
+
+          const { unit_price, cgst, sgst ,discount,discount_type} = item[0];
+
+          const newTotalPrice = (unit_price * new_quantity);
+
+
+          let discountAmount = 0;
+          if (discount_type === 'Percentage') {
+              // Ensure percentage doesn't exceed 100%
+              discountAmount = Math.min(newTotalPrice * (discount / 100), newTotalPrice);
+          } else if (discount_type === 'Fixed') {
+              // Ensure fixed discount doesn't exceed total price
+              discountAmount = Math.min(discount, newTotalPrice);
+          } else {
+              return res.status(400).json({ error: 'Invalid discount type' });
+          }
+
+          const discountedPrice = newTotalPrice  - discountAmount;
+
+          const cgstValue = parseFloat(item[0].cgst) || 0;
+          const sgstValue = parseFloat(item[0].sgst) || 0;
+        console.log("CGST:", cgstValue, "SGST:", sgstValue);
+        const totaltax = (cgstValue + sgstValue) / 100;
+        const taxableamount = totaltax > 0 ? discountedPrice / (1 + totaltax) : discountedPrice;
+        console.log("totaltax", totaltax);
+
+          // Update order item quantity
+          await query(
+              'UPDATE retail_order_items SET quantity = ?, discounted_price = ?,total_price = ? ,taxable_amount = ? WHERE id = ?',
+              [new_quantity,discountAmount, discountedPrice,taxableamount , order_item_id]
+          );
+
+          // Recalculate totals for the retail_orders table
+          await retailController.recalculateOrderTotals(order_id, query);
+          // await retailController.updateOrderItemDiscount();
+
+          res.json({ message: 'Order item quantity updated successfully' });
+
+      } catch (error) {
+          console.error('Error:', error);
+          res.status(500).json({ error: 'Internal Server Error' });
+      }
+  }
     //recalculating in backend part 
 
     static async updateOrderItemDiscount(req, res) {
@@ -1009,8 +1103,10 @@ class retailController{
               return res.status(404).json({ error: 'Order item not found' });
           }
   
-          const { total_price, quantity, cgst, sgst } = item[0];
-  
+          const { unit_price, quantity, cgst, sgst } = item[0];
+          
+          const total_price = unit_price * quantity ;
+
           let discountAmount = 0;
           if (normalizedDiscountType === 'Percentage') {
               // Ensure percentage doesn't exceed 100%
@@ -1023,11 +1119,19 @@ class retailController{
           }
   
           const discountedPrice = total_price - discountAmount;
+
+          const cgstValue = parseFloat(item[0].cgst) || 0;
+          const sgstValue = parseFloat(item[0].sgst) || 0;
+        console.log("CGST:", cgstValue, "SGST:", sgstValue);
+        const totaltax = (cgstValue + sgstValue) / 100;
+        const taxableamount = totaltax > 0 ? discountedPrice / (1 + totaltax) : discountedPrice;
+        console.log("totaltax", totaltax);
+
   
           // Update order item
           await query(
-              'UPDATE retail_order_items SET discount_type = ?, discount = ?, discounted_price = ?, total_price = ? WHERE id = ?',
-              [normalizedDiscountType, discountAmount, discountedPrice, discountedPrice, order_item_id]
+              'UPDATE retail_order_items SET discount_type = ?, discount = ?, discounted_price = ?, total_price = ? , taxable_amount = ? WHERE id = ?',
+              [normalizedDiscountType, discount_value, discountAmount, discountedPrice, taxableamount,order_item_id]
           );
   
           // Recalculate totals for the retail_orders table
@@ -1045,37 +1149,7 @@ class retailController{
       }
   }
 
-  static async updateOrderItemQuantity(req, res) {
-      const query = util.promisify(db.query).bind(db);
-      try {
-          const { order_item_id, new_quantity, order_id } = req.body;
-
-          // Get current item details
-          const item = await query('SELECT * FROM retail_order_items WHERE id = ?', [order_item_id]);
-          if (item.length === 0) {
-              return res.status(404).json({ error: 'Order item not found' });
-          }
-
-          const { discounted_price, cgst, sgst } = item[0];
-
-          const newTotalPrice = discounted_price * new_quantity;
-
-          // Update order item quantity
-          await query(
-              'UPDATE retail_order_items SET quantity = ?, total_price = ? WHERE id = ?',
-              [new_quantity, newTotalPrice, order_item_id]
-          );
-
-          // Recalculate totals for the retail_orders table
-          await retailController.recalculateOrderTotals(order_id, query);
-
-          res.json({ message: 'Order item quantity updated successfully' });
-
-      } catch (error) {
-          console.error('Error:', error);
-          res.status(500).json({ error: 'Internal Server Error' });
-      }
-  }
+  
 
   static async recalculateOrderTotals(order_id, query) {
     try {
@@ -1095,8 +1169,10 @@ class retailController{
       let totalorderitemscgst = 0;
       let totalorderitemssgst = 0;
 
+      
       // Calculate totals
       orderItems.forEach(item => {
+        console.log(item)
         let item_total = parseFloat(item.quantity) * parseFloat(item.unit_price);
 
         let discount_value = 0;
@@ -1183,32 +1259,32 @@ static async addOrderItem(req, res) {
     const insertValues = [];
     
     items.forEach(item => {
-        const { product_id, quantity, unit_price, discount_type, discount_value, cgst, sgst } = item;
+        const { product_id, quantity, unit_price, discount_type, discount_value, cgst, sgst,taxable_amount,total_price,discounted_price } = item;
 
         if (!product_id || !quantity || !unit_price) {
             throw new Error(`Missing required fields for product_id: ${product_id}`);
         }
 
         // Calculate discount
-        let discountAmount = 0;
-        if (discount_type === 'Percentage') {
-            discountAmount = (unit_price * discount_value) / 100;
-        } else if (discount_type === 'Fixed') {
-            discountAmount = discount_value;
-        }
+        // let discountAmount = 0;
+        // if (discount_type === 'Percentage') {
+        //     discountAmount = (unit_price * discount_value) / 100;
+        // } else if (discount_type === 'Fixed') {
+        //     discountAmount = discount_value;
+        // }
 
         // Calculate final price
-        const discountedPrice = Math.max(unit_price - discountAmount, 0);
-        const totalPrice = discountedPrice * quantity;
+        // const discountedPrice = Math.max(unit_price - discountAmount, 0);
+        // const totalPrice = discountedPrice * quantity;
 
         // Prepare values for bulk insert
-        insertValues.push([order_id, product_id, quantity, unit_price, discount_type, discountAmount, discountedPrice, totalPrice, cgst, sgst,retail_shop_id]);
+        insertValues.push([order_id, product_id, quantity, unit_price, discount_type, discount_value, discounted_price, total_price, cgst, sgst,taxable_amount,retail_shop_id]);
     });
 
     // Insert multiple order items at once
     await query(
         `INSERT INTO retail_order_items 
-         (order_id, item_id, quantity, unit_price, discount_type, discount, discounted_price, total_price, cgst, sgst,retail_shop_id) 
+         (order_id, item_id, quantity, unit_price, discount_type, discount, discounted_price, total_price, cgst, sgst,taxable_amount,retail_shop_id) 
          VALUES ?`,
         [insertValues]
     );
@@ -1243,8 +1319,585 @@ static async getCategorySections(req, res) {
 }
 
 
-    
+static async getConfiguration(req, res) {
+  const query = util.promisify(db.query).bind(db);
+  try {
+    const { retailShopId } = req.params;
+
+    const config = await query(
+        "SELECT * FROM configuration WHERE retail_shop_id = ?",
+        [retailShopId]
+    );
+
+    if (config.length === 0) {
+        return res.status(404).json({ message: "Configuration not found" });
+    }
+
+    res.status(200).json(config[0]);
+} catch (error) {
+    console.error("Error fetching configuration:", error);
+    res.status(500).json({ error: "Internal Server Error" });
 }
+
+}
+
+static async saveConfiguration (req, res){
+  const query = util.promisify(db.query).bind(db);
+  try {
+      const { retail_shop_id, sku_enabled, billing_enabled, billing_notes,section_billing_enabled } = req.body;
+
+      const existingConfig = await query(
+          "SELECT id FROM configuration WHERE retail_shop_id = ?",
+          [retail_shop_id]
+      );
+
+      if (existingConfig.length > 0) {
+          // If configuration exists, update it
+          await query(
+              "UPDATE configuration SET sku_enabled = ?, billing_enabled = ?,section_billing_enabled = ?, billing_notes = ?, updated_at = NOW() WHERE retail_shop_id = ?",
+              [sku_enabled, billing_enabled,section_billing_enabled, JSON.stringify(billing_notes), retail_shop_id]
+          );
+          return res.status(200).json({ message: "Configuration updated successfully" });
+      } else {
+          // If no existing config, insert new
+          await query(
+              "INSERT INTO configuration (retail_shop_id, sku_enabled, billing_enabled,section_billing_enabled = ?, billing_notes) VALUES (?, ?, ?, ?)",
+              [retail_shop_id, sku_enabled, billing_enabled, section_billing_enabled,JSON.stringify(billing_notes)]
+          );
+          return res.status(201).json({ message: "Configuration created successfully" });
+      }
+  } catch (error) {
+      console.error("Error saving configuration:", error);
+      res.status(500).json({ error: "Internal Server Error" });
+  }
+};
+
+
+// static async getAllitems(req, res) {
+//   const query = util.promisify(db.query).bind(db);
+//   try {
+//     const id = req.params.id;
+//     const items = await query(
+//       `SELECT 
+//       rt.id AS item_id,
+//       rt.name AS item_name,
+//       rt.price AS item_price,
+//       rt.barcode AS item_barcode,
+//       rt.cgst AS item_cgst,
+//       rt.sgst AS item_sgst,
+//       rt.hsn_code AS item_hsn_code,
+//       rt.is_active AS item_is_active,
+//       rt.category_sku_id
+//       FROM retail_items rt WHERE retail_shop_id = ? `,
+//       [id]
+//     );
+//     res.status(200).json(items);
+//   } catch (error) {
+//     console.error('Error fetching categories:', error);
+//     res.status(500).json({ error: 'Internal Server Error' });
+//   }
+// }
+    
+
+static async getAllitems(req, res) {
+  const query = util.promisify(db.query).bind(db);
+  try {
+      const { id, section_id } = req.params; // Get shop_id and optional section_id
+
+      let sqlQuery = `
+          SELECT 
+              rt.id AS item_id,
+              rt.name AS item_name,
+              rt.price AS item_price,
+              rt.barcode AS item_barcode,
+              rt.cgst AS item_cgst,
+              rt.sgst AS item_sgst,
+              rt.hsn_code AS item_hsn_code,
+              rt.is_active AS item_is_active,
+              rt.category_sku_id
+          FROM retail_items rt
+          WHERE rt.retail_shop_id = ?
+      `;
+      
+      const queryParams = [id]; // Always pass `retail_shop_id`
+
+      if (section_id) {
+          sqlQuery += ` AND rt.category_id IN (
+              SELECT category_id FROM retail_section_category_mapping 
+              WHERE section_id = ? AND is_active = 1
+          )`;
+          queryParams.push(section_id); // Pass `section_id` if provided
+      }
+
+      const items = await query(sqlQuery, queryParams);
+      res.status(200).json(items);
+  } catch (error) {
+      console.error('Error fetching items:', error);
+      res.status(500).json({ error: 'Internal Server Error' });
+  }
+}
+
+
+//report
+static async getTodayTotalAmount(req, res) {
+  const query = util.promisify(db.query).bind(db);
+  try {
+      const { retail_shop_id } = req.params;
+      
+      if (!retail_shop_id) {
+          return res.status(400).json({ error: 'Retail shop ID is required' });
+      }
+
+      const todayDate = new Date().toISOString().split('T')[0]; // Get today's date in YYYY-MM-DD format
+
+      const result = await query(
+          `SELECT SUM(grand_total) AS total_grand_total 
+           FROM retail_orders 
+           WHERE payment_status =? AND retail_shop_id = ? AND DATE(created_at) = ?`, // Extract only the date part
+          ['Paid',retail_shop_id, todayDate]
+      );
+
+      return res.status(200).json({
+          retail_shop_id,
+          total_grand_total: result[0].total_grand_total || 0
+      });
+
+  } catch (error) {
+      console.error('Error:', error);
+      return res.status(500).json({ error: 'Internal Server Error' });
+  }
+}
+
+
+static async getTodayCategoryTotals(req, res) {
+  const query = util.promisify(db.query).bind(db);
+  try {
+      const { retail_shop_id } = req.params;
+
+      if (!retail_shop_id) {
+          return res.status(400).json({ error: 'Retail shop ID is required' });
+      }
+
+      const todayDate = new Date().toISOString().split('T')[0]; // Get today's date in YYYY-MM-DD format
+
+      const result = await query(
+          `SELECT 
+              rc.id AS category_id,
+              rc.name AS category_name,
+              SUM(roi.total_price) AS total_order_amount,
+              SUM(roi.quantity) AS total_quantity
+          FROM retail_order_items roi
+          JOIN retail_items ri ON roi.item_id = ri.id
+          JOIN retail_category rc ON ri.category_id = rc.id
+          JOIN retail_orders ro ON roi.order_id = ro.id
+          WHERE roi.retail_shop_id = ? 
+            AND rc.retail_shop_id = ? 
+            AND DATE(ro.created_at) = ?  -- Match only today's orders
+            AND ro.payment_status = 'Paid'
+          GROUP BY rc.id, rc.name
+          ORDER BY total_order_amount DESC`, // Order by highest sales
+          [retail_shop_id, retail_shop_id, todayDate]
+      );
+
+      return res.status(200).json(result);
+
+  } catch (error) {
+      console.error('Error:', error);
+      return res.status(500).json({ error: 'Internal Server Error' });
+  }
+}
+
+static async getTodayTopItems(req, res) {
+  const query = util.promisify(db.query).bind(db);
+  try {
+      const { retail_shop_id } = req.params;
+
+      if (!retail_shop_id) {
+          return res.status(400).json({ error: 'Retail shop ID is required' });
+      }
+
+      const todayDate = new Date().toISOString().split('T')[0]; // Get today's date in YYYY-MM-DD format
+
+      const result = await query(
+          `SELECT 
+              ri.name AS item_name,
+              SUM(roi.quantity) AS total_quantity_sold,
+              SUM(roi.total_price) AS total_sales_amount
+          FROM retail_order_items roi
+          JOIN retail_items ri ON roi.item_id = ri.id
+          JOIN retail_orders ro ON roi.order_id = ro.id
+          WHERE roi.retail_shop_id = ? 
+            AND ro.retail_shop_id = ? 
+            AND DATE(ro.created_at) = ?  -- Match today's orders
+            AND ro.payment_status = 'Paid'  -- Only include paid orders
+          GROUP BY ri.id, ri.name
+          ORDER BY total_quantity_sold DESC  -- Order by highest quantity sold
+          LIMIT 20`,  // Fetch only the top 20 items
+          [retail_shop_id, retail_shop_id, todayDate]
+      );
+
+      return res.status(200).json(result);
+
+  } catch (error) {
+      console.error('Error:', error);
+      return res.status(500).json({ error: 'Internal Server Error' });
+  }
+}
+
+//sold item dt to dt
+static async getSoldItemsByDate(req, res) {
+  const query = util.promisify(db.query).bind(db);
+  try {
+      const { retail_shop_id } = req.params;
+      const { start_date, end_date, payment_mode } = req.query;
+
+      if (!retail_shop_id || !start_date || !end_date) {
+          return res.status(400).json({ error: 'Retail shop ID, start_date, and end_date are required' });
+      }
+
+      let sqlQuery = `
+          SELECT 
+              ri.name AS item_name,
+              SUM(roi.quantity) AS total_quantity_sold,
+              SUM(roi.total_price) AS total_sales_amount
+          FROM retail_order_items roi
+          JOIN retail_items ri ON roi.item_id = ri.id
+          JOIN retail_orders ro ON roi.order_id = ro.id
+          WHERE roi.retail_shop_id = ? 
+            AND ro.retail_shop_id = ? 
+            AND DATE(ro.created_at) BETWEEN ? AND ?  
+            AND ro.payment_status = 'Paid'
+      `;
+
+      const queryParams = [retail_shop_id, retail_shop_id, start_date, end_date];
+
+      // Apply payment mode filter if provided
+      if (payment_mode) {
+          sqlQuery += ` AND ro.payment_mode = ?`;
+          queryParams.push(payment_mode);
+      }
+
+      sqlQuery += ` GROUP BY ri.id, ri.name ORDER BY total_quantity_sold DESC`;
+
+      const result = await query(sqlQuery, queryParams);
+      return res.status(200).json(result);
+
+  } catch (error) {
+      console.error('Error:', error);
+      return res.status(500).json({ error: 'Internal Server Error' });
+  }
+}
+
+static async getOrdersWithDiscounts(req, res) {
+  const query = util.promisify(db.query).bind(db);
+  try {
+      const { retail_shop_id } = req.params;
+      const { start_date, end_date, payment_mode } = req.query;
+
+      if (!retail_shop_id || !start_date || !end_date) {
+          return res.status(400).json({ error: 'Retail shop ID, start_date, and end_date are required' });
+      }
+
+      let sqlQuery = `
+          SELECT 
+              ro.id AS order_id,
+              ro.total_amount,
+              ro.payment_status,
+              ro.payment_mode,
+              ro.via_cash,
+              ro.via_upi,
+              ro.via_card,
+              ro.grand_total,
+              ro.total_discount AS order_discount,  -- Total discount from retail_orders table
+              COALESCE(SUM(roi.discounted_price), 0) AS total_item_discount  -- Sum of item-level discounts
+          FROM retail_orders ro
+          LEFT JOIN retail_order_items roi ON ro.id = roi.order_id
+          WHERE ro.retail_shop_id = ? 
+            AND DATE(ro.created_at) BETWEEN ? AND ?  
+            AND ro.payment_status = 'Paid'
+      `;
+
+      const queryParams = [retail_shop_id, start_date, end_date];
+
+      // Apply payment mode filter if provided
+      if (payment_mode) {
+          sqlQuery += ` AND ro.payment_mode = ?`;
+          queryParams.push(payment_mode);
+      }
+
+      sqlQuery += ` GROUP BY ro.id ORDER BY ro.created_at DESC`;  // Group by order and sort by latest order
+
+      const result = await query(sqlQuery, queryParams);
+      return res.status(200).json(result);
+
+  } catch (error) {
+      console.error('Error:', error);
+      return res.status(500).json({ error: 'Internal Server Error' });
+  }
+}
+
+
+static async getRetailOrderscustomer(req, res) {
+  const query = util.promisify(db.query).bind(db);
+  try {
+    const { start_date, end_date } = req.query;
+    const { retail_shop_id } = req.params; // Extract retail_shop_id from URL params
+
+    if (!start_date || !end_date) {
+      return res.status(400).json({ error: 'Missing start_date or end_date' });
+    }
+
+    const orders = await query(
+      `SELECT 
+          ro.id AS order_id,
+          rc.name AS customer_name,
+          rc.phone AS phone_number,
+          rc.customer_type AS customer_type,
+          rc.gst_number AS gst_number
+      FROM retail_orders ro
+      INNER JOIN retail_customers rc ON ro.customer_id = rc.id 
+      WHERE ro.retail_shop_id = ? 
+      AND DATE(ro.created_at) BETWEEN ? AND ?
+      AND ro.payment_status = 'Paid'
+      ORDER BY DATE(ro.created_at) DESC`,
+      [retail_shop_id, start_date, end_date]
+    );
+
+    return res.status(200).json(orders);
+  } catch (error) {
+    console.error('Error:', error);
+    return res.status(500).json({ error: 'Internal Server Error' });
+  }
+}
+
+
+static async getRetailgstreport(req, res) {
+  const query = util.promisify(db.query).bind(db);
+  try {
+    const { start_date, end_date, payment_mode } = req.query;
+    const { retail_shop_id } = req.params; // Extract shop ID from URL params
+
+    if (!start_date || !end_date) {
+      return res.status(400).json({ error: 'Missing start_date or end_date' });
+    }
+
+    let sqlQuery = `
+      SELECT 
+          ro.id AS order_id,
+          ro.taxable_amount,
+          ro.grand_total,
+          ro.payment_mode,
+          ro.total_cgst,
+          ro.total_sgst,
+          ro.created_at
+      FROM retail_orders ro
+      WHERE ro.retail_shop_id = ?
+      AND ro.payment_status = 'Paid'
+      AND DATE(ro.created_at) BETWEEN ? AND ?
+    `;
+
+    const params = [retail_shop_id, start_date, end_date];
+
+    // Apply payment mode filter if provided
+    if (payment_mode) {
+      sqlQuery += ` AND FIND_IN_SET(?, ro.payment_mode) > 0`;
+      params.push(payment_mode);
+    }
+
+    sqlQuery += ` ORDER BY DATE(ro.created_at) DESC`;
+
+    const orders = await query(sqlQuery, params);
+
+    return res.status(200).json(orders);
+  } catch (error) {
+    console.error('Error:', error);
+    return res.status(500).json({ error: 'Internal Server Error' });
+  }
+}
+
+static async getsectionreport(req, res) {
+  const query = util.promisify(db.query).bind(db);
+  try {
+      const { retailshopid, sectionid } = req.params;
+      const { start_date, end_date, payment_mode } = req.query;
+
+      let sqlQuery = `
+          SELECT 
+              id, date, time, retail_shop_id, order_no, customer_id, user_id, 
+              total_amount, total_discount, taxable_amount, total_cgst, total_sgst, 
+              grand_total, payment_status, payment_mode, via_cash, via_card, via_upi, 
+              order_status, created_at, updated_at, discount_type, section_id
+          FROM retail_orders
+          WHERE retail_shop_id = ? AND payment_status = 'Paid'
+      `;
+
+      const queryParams = [retailshopid];
+
+      // Add optional filters
+      if (sectionid && sectionid !== 'null') {
+          sqlQuery += ` AND section_id = ?`;
+          queryParams.push(sectionid);
+      }
+
+      if (start_date && end_date) {
+          sqlQuery += ` AND DATE(created_at) BETWEEN ? AND ?`;
+          queryParams.push(start_date, end_date);
+      }
+
+      if (payment_mode) {
+          const modes = payment_mode.split(','); // Allows filtering multiple payment modes
+          const placeholders = modes.map(() => `payment_mode LIKE ?`).join(' OR '); 
+          sqlQuery += ` AND (${placeholders})`;
+          queryParams.push(...modes.map(mode => `%${mode}%`)); // Matches partial payment mode
+      }
+
+      const orders = await query(sqlQuery, queryParams);
+      res.status(200).json(orders);
+  } catch (error) {
+      console.error('Error fetching orders:', error);
+      res.status(500).json({ error: 'Internal Server Error' });
+  }
+}
+
+static async checkCustomerType (req, res) {
+  const query = util.promisify(db.query).bind(db);
+  try {
+
+    const { phone } = req.query; 
+    if (!phone) {
+      return res.status(400).json({ error: "Phone number is required" });
+  }
+
+  // Check if the phone number exists
+  const result = await query(`SELECT customer_type FROM retail_customers WHERE phone = ? LIMIT 1`, [phone]);
+
+  // If phone exists, return "Repeat", otherwise return "New"
+  if (result.length > 0) {
+      return res.status(200).json({ customer_type: "Repeat" });
+  } else {
+      return res.status(200).json({ customer_type: "New" });
+  }
+  } catch (error) {
+    console.error("Error:", error);
+    return res.status(500).json({ error: "Internal Server Error" });
+  }
+}
+
+
+
+
+static async getRetailBusinesses(req, res) {
+  const query = util.promisify(db.query).bind(db);
+  
+  try {
+    const { business_entity_id } = req.query;
+
+    if (!business_entity_id) {
+      return res.status(400).json({ error: "business_entity_id is required" });
+    }
+
+    // Query to fetch business entity and associated retail shop where business_type is 'RT'
+    const sql = `
+    SELECT 
+      be.business_entity_id,
+      be.business_name,
+      be.name,
+      be.email,
+      be.contact_no,
+      be.address,
+      be.group_id,
+      be.business_type,
+      rs.id AS retail_shop_id,
+      rs.name AS retail_shop_name,
+      rs.gst_no
+    FROM business_entity be
+    LEFT JOIN retail_shops rs ON be.business_entity_id = rs.id
+    WHERE be.business_type = 'RT' AND be.business_entity_id = ?;
+  `;
+  
+
+    const results = await query(sql, [business_entity_id]);
+
+    if (results.length === 0) {
+      return res.status(404).json({ message: "No retail businesses found" });
+    }
+
+    return res.status(200).json(results);
+  } catch (error) {
+    console.error("Error:", error);
+    return res.status(500).json({ error: "Internal Server Error" });
+  }
+}
+
+
+static async uploadRetailData(req, res) {
+  const query = util.promisify(db.query).bind(db);
+  try {
+    if (!req.file) {
+      return res.status(400).json({ error: "No file uploaded" });
+    }
+
+    const workbook = xlsx.read(req.file.buffer, { type: "buffer" });
+    const sheet = workbook.Sheets[workbook.SheetNames[0]];
+    const data = xlsx.utils.sheet_to_json(sheet);
+
+    for (const row of data) {
+      const { 
+        "Retail Shop ID": retailShopId, 
+        "Category Name": categoryName, 
+        "Section Name": sectionName, 
+        "Item Name": itemName, 
+        "Item Description": description, 
+        "Price": price, 
+        "Barcode": barcode, 
+        "CGST": cgst, 
+        "SGST": sgst, 
+        "HSN Code": hsnCode, 
+        "Discount Type": discountType, 
+        "Discounted Price": discountedPrice
+      } = row;
+
+      // 1️⃣ Insert or Update Category
+      let category = await query("SELECT id FROM retail_category WHERE name = ? AND retail_shop_id = ?", [categoryName, retailShopId]);
+      let categoryId = category.length ? category[0].id : (await query("INSERT INTO retail_category (name, retail_shop_id) VALUES (?, ?)", [categoryName, retailShopId])).insertId;
+
+      // 2️⃣ Insert or Update Section
+      let section = await query("SELECT id FROM retail_sections WHERE name = ? AND retail_shop_id = ?", [sectionName, retailShopId]);
+      let sectionId = section.length ? section[0].id : (await query("INSERT INTO retail_sections (name, retail_shop_id) VALUES (?, ?)", [sectionName, retailShopId])).insertId;
+
+      // 3️⃣ Insert or Update Category-Section Mapping
+      let mapping = await query("SELECT id FROM retail_section_category_mapping WHERE section_id = ? AND category_id = ?", [sectionId, categoryId]);
+      if (!mapping.length) {
+        await query("INSERT INTO retail_section_category_mapping (section_id, category_id) VALUES (?, ?)", [sectionId, categoryId]);
+      }
+
+      // 4️⃣ Insert or Update Item
+      let item = await query("SELECT id FROM retail_items WHERE name = ? AND retail_shop_id = ?", [itemName, retailShopId]);
+      if (item.length) {
+        await query(
+          "UPDATE retail_items SET description = ?, price = ?, barcode = ?, cgst = ?, sgst = ?, hsn_code = ?, category_id = ? WHERE id = ?",
+          [description, price, barcode, cgst, sgst, hsnCode, categoryId, item[0].id]
+        );
+      } else {
+        await query(
+          "INSERT INTO retail_items (name, description, price, barcode, cgst, sgst, hsn_code, category_id, retail_shop_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+          [itemName, description, price, barcode, cgst, sgst, hsnCode, categoryId, retailShopId]
+        );
+      }
+    }
+
+    res.status(200).json({ message: "Retail data uploaded successfully" });
+
+  } catch (error) {
+    console.error("Error:", error);
+    res.status(500).json({ error: "Internal Server Error" });
+  }
+}
+
+}
+
+
+
 
 
 export { retailController };
