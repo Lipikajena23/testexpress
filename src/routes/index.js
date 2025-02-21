@@ -9,6 +9,7 @@ import businessEntityRoutes from './businessEntityRoutes.js'
 import reportsRoutes from './reportsRoutes.js'
 import retailRoutes from './retailRoutes.js';
 import cookieParser from 'cookie-parser';
+import hrRoutes from './hrRoutes.js';
 import session from 'express-session';
 import cors from 'cors';
 
@@ -34,6 +35,7 @@ router.use('/home',homeDataRoutes);
 router.use('/businessEntities',businessEntityRoutes);
 router.use('/reports',reportsRoutes);
 router.use('/retail',retailRoutes);
+router.use('/hr',hrRoutes);
 
 export default router;
 
